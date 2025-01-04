@@ -17,10 +17,11 @@ using namespace ns3;
 
 // ------------------ Custom Error Model ------------------
 class OpticalErrorModel : public ErrorModel
-{
+{ // This part simulates error characteristics such as packet corruption that happens during transmission-
+  // based on BER (the probability of a bit being corrupted), and SNR (used to access the quality of the signal)
 public:
   static TypeId GetTypeId (void)
-  {
+  { // Register the class as an NS-3 type system; it allows the class to be instantiated within NS-3
     static TypeId tid = TypeId ("OpticalErrorModel")
       .SetParent<ErrorModel> ()
       .SetGroupName("Network")
@@ -28,27 +29,28 @@ public:
     return tid;
   }
 
-  OpticalErrorModel ()
-    : m_random (CreateObject<UniformRandomVariable> ()),
-      m_ber (1e-8),
-      m_snrDb (30.0)
+  OpticalErrorModel () // This onstructor initializes the error model with the default BER and SNR values
+    : m_random (CreateObject<UniformRandomVariable> ()), // RNG to simulate randomness in packet corruption
+      m_ber (1e-8), // Default BER 
+      m_snrDb (30.0) // Default SNR in dB
   {
   }
-
+  // Setters and Getters of the Error Model
   void SetBer (double ber) { m_ber = ber; }
   void SetSnrDb (double snrDb) { m_snrDb = snrDb; }
 
   double GetBer () const { return m_ber; }
   double GetSnrDb () const { return m_snrDb; }
 
+// Packet corruption logic
 private:
   virtual bool DoCorrupt (Ptr<Packet> p) override
   {
     // Very basic bit-flip approach
-    uint32_t bits = p->GetSize () * 8;
+    uint32_t bits = p->GetSize () * 8; // iterate through all the bits in the packet
     for (uint32_t i = 0; i < bits; ++i)
       {
-        if (m_random->GetValue () < m_ber)
+        if (m_random->GetValue () < m_ber) // A random number is generated for each bit, and if it's less, corrupt the packet
           {
             return true; // Corrupt the packet
           }
@@ -58,9 +60,9 @@ private:
 
   virtual void DoReset () override {}
 
-  Ptr<UniformRandomVariable> m_random;
-  double m_ber;
-  double m_snrDb;
+  Ptr<UniformRandomVariable> m_random; // RNG for the corruption
+  double m_ber; // BER
+  double m_snrDb; // SNR
 };
 
 // ------------------ Main Simulation ------------------
@@ -81,36 +83,38 @@ main (int argc, char *argv[])
   cmd.Parse (argc, argv);
 
   // Create 2 nodes
-  NodeContainer nodes;
-  nodes.Create (2);
+  NodeContainer nodes; // 'NodeContainer' is an NS3 network container that simulate nodes
+  nodes.Create (2); // Create two nodes
 
   // We'll model two WDM wavelengths as two separate point-to-point channels
-  uint32_t numWavelengths = 2;
-  std::vector<PointToPointHelper> wdmHelpers (numWavelengths);
-  NetDeviceContainer allDevices;
+  uint32_t numWavelengths = 2; // Define number of wavelength (two in this example script)
+  // 'PointToPointHelper' is a helper class that is specific to NS3 that helps create point-to-point links
+  std::vector<PointToPointHelper> wdmHelpers (numWavelengths); // We create an object of type PointToPointHelper for each wavelength
+  NetDeviceContainer allDevices; // 'NetDeviceContainer' hols network devices (e.g., NIC) installed in the node
 
+  // We loop through each wavelengths to configure the properties
   for (uint32_t i = 0; i < numWavelengths; i++)
     {
       // ---------- ASYMMETRIC LINK ATTRIBUTES ----------
       if (i == 0)
         {
-          // Wavelength 0
-          wdmHelpers[i].SetDeviceAttribute ("DataRate", StringValue ("10Gbps"));
-          wdmHelpers[i].SetChannelAttribute ("Delay", StringValue ("2ms"));
+          // Wavelength 1
+          wdmHelpers[i].SetDeviceAttribute ("DataRate", StringValue ("10Gbps")); // Set the data rate for the link
+          wdmHelpers[i].SetChannelAttribute ("Delay", StringValue ("2ms")); // Set the propagation delay for the link
         }
       else
         {
-          // Wavelength 1
+          // Wavelength 2
           wdmHelpers[i].SetDeviceAttribute ("DataRate", StringValue ("5Gbps"));
           wdmHelpers[i].SetChannelAttribute ("Delay", StringValue ("5ms"));
         }
 
-      // Install on the same two nodes
-      NetDeviceContainer devices = wdmHelpers[i].Install (nodes);
-
+      // Install the point-to-point link (wavelength) on the nodes
+      NetDeviceContainer devices = wdmHelpers[i].Install (nodes); // So, now 'NetDeviceContainer' containes the network devices- 
+                                                                  //-created on each node for the link
       // ---------- HIGHER & DISTINCT BER/SNR ----------
       Ptr<OpticalErrorModel> em = CreateObject<OpticalErrorModel> ();
-      if (i == 0)
+      if (i == 0) // Configuring distinct BER and SNR values for each wavelength
         {
           em->SetBer (1e-7);    // Wavelength 0: 1e-7
           em->SetSnrDb (25.0); // e.g., 25 dB
@@ -128,7 +132,7 @@ main (int argc, char *argv[])
       allDevices.Add (devices);
     }
 
-  // Install the Internet stack on both nodes
+  // Install the Internet stack on both nodes (TCP/IP) for upper-layer protocols like UDP
   InternetStackHelper stack;
   stack.Install (nodes);
 
@@ -136,7 +140,7 @@ main (int argc, char *argv[])
   Ipv4AddressHelper address;
   for (uint32_t i = 0; i < numWavelengths; i++)
     {
-      std::ostringstream subnet;
+      std::ostringstream subnet; // Creates separate subnets (e.g., 10.1.1.0/24 and 10.1.2.0/24) for each wavelength
       subnet << "10.1." << (i + 1) << ".0"; // 10.1.1.0 / 10.1.2.0
       address.SetBase (subnet.str ().c_str (), "255.255.255.0");
 
@@ -145,8 +149,8 @@ main (int argc, char *argv[])
           NetDeviceContainer (allDevices.Get (2*i), allDevices.Get (2*i+1)));
     }
 
-  // Optional: Use global routing
-  Ipv4GlobalRoutingHelper::PopulateRoutingTables ();
+  // Use global routing
+  Ipv4GlobalRoutingHelper::PopulateRoutingTables (); // Automatically populates the routing tables for IP communication between nodes
 
   // ---------- APPLICATIONS (UDP Echo) ----------
   // We'll launch a UdpEcho server on node 1 for each wavelength.
@@ -161,7 +165,7 @@ main (int argc, char *argv[])
       Ipv4Address serverAddr = ipv4Node1->GetAddress (1 + i, 0).GetLocal ();
 
       // Set up the server
-      UdpEchoServerHelper echoServer (serverPortBase + i);
+      UdpEchoServerHelper echoServer (serverPortBase + i); // Sets up a UDP Echo Server on Node 1 (v2) for each wavelength which listens for incoming packets
       ApplicationContainer serverApp = echoServer.Install (nodes.Get (1));
       serverApp.Start (Seconds (1.0));
       serverApp.Stop (Seconds (30.0));
@@ -171,8 +175,8 @@ main (int argc, char *argv[])
 
       // ---------- DISTINCT TRAFFIC PATTERNS ----------
       if (i == 0)
-        {
-          // Wavelength 0
+        { // Configures the UDP Echo Client on Node 0 (v1) with distinct traffic patterns for each wavelength.
+          // Wavelength 0 
           echoClient.SetAttribute ("MaxPackets", UintegerValue (2000));
           echoClient.SetAttribute ("Interval", TimeValue (Seconds (0.002)));
           echoClient.SetAttribute ("PacketSize", UintegerValue (1024));
@@ -192,10 +196,11 @@ main (int argc, char *argv[])
     }
 
   // ---------- FLOW MONITOR ----------
+  //Installs a FlowMonitor to track throughput, delay, and packet loss for all flows
   FlowMonitorHelper flowmonHelper;
   Ptr<FlowMonitor> flowmon = flowmonHelper.InstallAll ();
 
-  // PCAP tracing
+  // PCAP tracing enabled for all links
   for (uint32_t i = 0; i < numWavelengths; i++)
     {
       std::ostringstream fname;
@@ -211,7 +216,7 @@ main (int argc, char *argv[])
   flowmon->CheckForLostPackets ();
   Ptr<Ipv4FlowClassifier> classifier =
       DynamicCast<Ipv4FlowClassifier> (flowmonHelper.GetClassifier ());
-  std::map<FlowId, FlowMonitor::FlowStats> stats = flowmon->GetFlowStats ();
+  std::map<FlowId, FlowMonitor::FlowStats> stats = flowmon->GetFlowStats (); // Collects flow statistics after the simulation
 
   NS_LOG_UNCOND ("\n========== Simulation Results ==========\n");
   for (auto &flow : stats)
@@ -225,16 +230,16 @@ main (int argc, char *argv[])
       if (duration > 0)
         {
           // bits/s -> Mbps
-          throughput = (flow.second.rxBytes * 8.0 / duration) / 1e6;
+          throughput = (flow.second.rxBytes * 8.0 / duration) / 1e6; // Calculates throughput (Mbps) for each flow
         }
 
       // Average end-to-end delay
       double avgDelay = 0.0;
       if (flow.second.rxPackets > 0)
         {
-          avgDelay = flow.second.delaySum.GetSeconds () / flow.second.rxPackets;
+          avgDelay = flow.second.delaySum.GetSeconds () / flow.second.rxPackets; // Calculate average delay (seconds) for each flow
         }
-
+      // Logs the performance metrics for each flow
       NS_LOG_UNCOND ("Flow " << flow.first 
                       << " (" << t.sourceAddress << " -> " 
                       << t.destinationAddress << ")");
